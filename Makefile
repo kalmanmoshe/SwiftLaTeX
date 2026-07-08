@@ -1,31 +1,29 @@
-PROJECT_NAME 	:= 	SwiftLaTeX
+PROJECT_NAME := SwiftLaTeX
 
-SUBDIRS			:=	pdftex.wasm \
-					xetex.wasm \
-					dvipdfm.wasm
+SUBDIRS := \
+	pdftex.wasm \
+	xetex.wasm \
+	dvipdfm.wasm
 
-_default:
-	@echo -e "\033[33m[BUILDING]\033[0m $(PROJECT_NAME)"
-	@$(MAKE) all --no-print-directory
+.DEFAULT_GOAL := all
 
-all: $(SUBDIRS)
-
-$(SUBDIRS):
-	@$(MAKE) -C $@ -j --no-print-directory && \
-	echo -e "\033[32m[OK]\033[0m $@" || \
-	echo -e "\033[31m[ERROR]\033[0m $@"
+all:
+	@printf "\033[33m[BUILDING]\033[0m $(PROJECT_NAME)\n"
+	@for dir in $(SUBDIRS); do \
+		$(MAKE) -C $$dir --no-print-directory || exit $$?; \
+		printf "\033[32m[OK]\033[0m $$dir\n"; \
+	done
 
 clean:
 	@for dir in $(SUBDIRS); do \
-		$(MAKE) -C $$dir clean; \
+		$(MAKE) -C $$dir clean --no-print-directory || exit $$?; \
 	done
 
 fclean:
 	@for dir in $(SUBDIRS); do \
-		$(MAKE) -C $$dir fclean; \
+		$(MAKE) -C $$dir fclean --no-print-directory || exit $$?; \
 	done
 
 re: fclean all
 
-.PHONY: all clean fclean re $(SUBDIRS)
-.SILENT: all clean fclean re $(SUBDIRS)
+.PHONY: all clean fclean re

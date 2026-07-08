@@ -1,10 +1,16 @@
 *.o
 swiftlatexxetex.wasm
 swiftlatexxetex.js
+swiftlatexxetex.worker.js
+
 swiftlatexpdftex.wasm
 swiftlatexpdftex.js
+swiftlatexpdftex.worker.js
+
 swiftlatexdvipdfm.js
 swiftlatexdvipdfm.wasm
+swiftlatexdvipdfm.worker.js
+
 *.Identifier
 .texlive_tmp
 .DS_Store

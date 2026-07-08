@@ -1,80 +1,100 @@
-PROJECT_NAME 	:= 	swiftlatexxetex.js
-CC 				= 	emcc
-CXX 			= 	em++
-DEBUGFLAGS 		= 	-O3
+PROJECT_NAME := swiftlatexxetex.worker.js
 
-CFLAGS 			= 	$(DEBUGFLAGS) -Wno-parentheses-equality -Wno-pointer-sign -DWEBASSEMBLY_BUILD \
-					-s USE_FREETYPE=1 -s USE_ICU=1 -s USE_LIBPNG=1 -fno-rtti -fno-exceptions
+CC  := emcc
+CXX := em++
 
-LDFLAGS 		= 	$(DEBUGFLAGS) --js-library library.js \
-					-s USE_FREETYPE=1 \
-					-s USE_ICU=1 \
-					-s USE_LIBPNG=1 \
-					--pre-js pre.js \
-					-s ENVIRONMENT="web" \
-					-s EXPORTED_FUNCTIONS='["_compileBibtex", "_compileLaTeX", "_compileFormat", "_main", "_setMainEntry"]' -s NO_EXIT_RUNTIME=1 \
-					-s WASM=1 -s EXPORTED_RUNTIME_METHODS=["cwrap"] -s ALLOW_MEMORY_GROWTH=1
+BUILD_DIR := build
 
-LINKFLAG 		= 	$(CXX) -o $@ $(LDFLAGS)
+CFLAGS := -O3 \
+	-Wno-parentheses-equality \
+	-Wno-pointer-sign \
+	-DWEBASSEMBLY_BUILD \
+	-s USE_FREETYPE=1 \
+	-s USE_ICU=1 \
+	-s USE_LIBPNG=1 \
+	-fno-rtti \
+	-fno-exceptions
 
-BUILD_DIR 		= 	build
+LDFLAGS := -O3 \
+	-s USE_FREETYPE=1 \
+	-s USE_ICU=1 \
+	-s USE_LIBPNG=1 \
+	-s SINGLE_FILE=1 \
+	-s ENVIRONMENT=web,worker \
+	-s EXPORTED_FUNCTIONS='["_compileBibtex", "_compileLaTeX", "_compileFormat", "_main", "_setMainEntry", "_malloc", "_free"]' \
+	-s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap"]' \
+	-s NO_EXIT_RUNTIME=1 \
+	-s ALLOW_MEMORY_GROWTH=1 \
+	--js-library library.js \
+	--pre-js pre.js
 
-TEXSOURCES 		= 	tex/xetex0.c tex/xetexini.c tex/xetex-pool.c  \
-					md5.c xmemory.c texfile.c kpseemu.c texmfmp.c main.c \
-					bibtex.c xetexdir/XeTeX_ext.c xetexdir/XeTeX_pic.c xetexdir/image/bmpimage.c xetexdir/image/jpegimage.c \
-					xetexdir/image/pngimage.c xetexdir/trans.c
+TEXSOURCES := \
+	tex/xetex0.c \
+	tex/xetexini.c \
+	tex/xetex-pool.c \
+	md5.c \
+	xmemory.c \
+	texfile.c \
+	kpseemu.c \
+	texmfmp.c \
+	main.c \
+	bibtex.c \
+	xetexdir/XeTeX_ext.c \
+	xetexdir/XeTeX_pic.c \
+	xetexdir/image/bmpimage.c \
+	xetexdir/image/jpegimage.c \
+	xetexdir/image/pngimage.c \
+	xetexdir/trans.c
 
-XETEXSOURCES 	= 	xetexdir/XeTeXOTMath.cpp \
-					xetexdir/XeTeXLayoutInterface.cpp \
-					xetexdir/XeTeXFontMgr.cpp xetexdir/XeTeXFontInst.cpp \
-					xetexdir/XeTeXFontMgr_FC.cpp xetexdir/hz.cpp \
-					xetexdir/pdfimage.cpp
+XETEXSOURCES := \
+	xetexdir/XeTeXOTMath.cpp \
+	xetexdir/XeTeXLayoutInterface.cpp \
+	xetexdir/XeTeXFontMgr.cpp \
+	xetexdir/XeTeXFontInst.cpp \
+	xetexdir/XeTeXFontMgr_FC.cpp \
+	xetexdir/hz.cpp \
+	xetexdir/pdfimage.cpp
 
-TECKITSOURCES 	= 	teckit/teckit-Engine.cpp
+TECKITSOURCES := \
+	teckit/teckit-Engine.cpp
 
-TEXOBJECTS 		= 	$(TEXSOURCES:%.c=$(BUILD_DIR)/%.o)
-XETEXOBJECTS 	= 	$(XETEXSOURCES:%.cpp=$(BUILD_DIR)/%.o)
-TECKITOBJECTS 	= 	$(TECKITSOURCES:%.cpp=$(BUILD_DIR)/%.o)
+TEXOBJECTS    := $(TEXSOURCES:%.c=$(BUILD_DIR)/%.o)
+XETEXOBJECTS  := $(XETEXSOURCES:%.cpp=$(BUILD_DIR)/%.o)
+TECKITOBJECTS := $(TECKITSOURCES:%.cpp=$(BUILD_DIR)/%.o)
 
-_default:
-	@$(MAKE) all --no-print-directory -j
+.DEFAULT_GOAL := all
 
 all: $(PROJECT_NAME)
 
 $(PROJECT_NAME): $(TEXOBJECTS) $(XETEXOBJECTS) $(TECKITOBJECTS)
-	@$(LINKFLAG) $(TEXOBJECTS) $(XETEXOBJECTS) $(TECKITOBJECTS) xpdf/xpdf.a graphite2/libgraphite2.a harfbuzz/libharfbuzz.a && \
-	echo -e "\033[32m[DONE]\033[0m $(PROJECT_NAME)" || \
-	echo -e "\033[31m[ERROR]\033[0m $(PROJECT_NAME)"
+	@$(CXX) -o $@ $(LDFLAGS) \
+		$(TEXOBJECTS) $(XETEXOBJECTS) $(TECKITOBJECTS) \
+		xpdf/xpdf.a graphite2/libgraphite2.a harfbuzz/libharfbuzz.a
+	@printf "\033[32m[DONE]\033[0m $(PROJECT_NAME)\n"
 
 $(TEXOBJECTS): $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(@D)
-	@$(CC) -c $(CFLAGS) -I. -I tex/ -I harfbuzz/ $< -o $@ && \
-	echo -e "\033[32m[OK]\033[0m $<" || \
-	echo -e "\033[31m[ERROR]\033[0m $<"
+	@$(CC) -c $(CFLAGS) -I. -Itex -Iharfbuzz $< -o $@
+	@printf "\033[32m[OK]\033[0m $<\n"
 
 $(XETEXOBJECTS): $(BUILD_DIR)/%.o: %.cpp
 	@mkdir -p $(@D)
-	@$(CXX) -c $(CFLAGS) -I. -I tex/ -I xetexdir/ -I harfbuzz/  -I xpdf/ -I xpdf/goo/ -I xpdf/xpdf/ $< -o $@ && \
-	echo -e "\033[32m[OK]\033[0m $<" || \
-	echo -e "\033[31m[ERROR]\033[0m $<"
+	@$(CXX) -c $(CFLAGS) -I. -Itex -Ixetexdir -Iharfbuzz -Ixpdf -Ixpdf/goo -Ixpdf/xpdf $< -o $@
+	@printf "\033[32m[OK]\033[0m $<\n"
 
 $(TECKITOBJECTS): $(BUILD_DIR)/%.o: %.cpp
 	@mkdir -p $(@D)
-	@$(CXX) -c $(CFLAGS) -I. -I teckit/ $< -o $@ && \
-	echo -e "\033[32m[OK]\033[0m $<" || \
-	echo -e "\033[31m[ERROR]\033[0m $<"
+	@$(CXX) -c $(CFLAGS) -I. -Iteckit $< -o $@
+	@printf "\033[32m[OK]\033[0m $<\n"
 
 clean:
-	@rm -rf $(BUILD_DIR) && \
-	echo -e "\033[32m[CLEANED]\033[0m $(BUILD_DIR)" || \
-	echo -e "\033[31m[ERROR]\033[0m $(BUILD_DIR)"
+	@rm -rf $(BUILD_DIR)
+	@printf "\033[32m[CLEANED]\033[0m $(BUILD_DIR)\n"
 
 fclean: clean
-	@rm -f $(PROJECT_NAME) && \
-	echo -e "\033[32m[CLEANED]\033[0m $(PROJECT_NAME)" || \
-	echo -e "\033[31m[ERROR]\033[0m $(PROJECT_NAME)"
+	@rm -f $(PROJECT_NAME)
+	@printf "\033[32m[FCLEAN]\033[0m $(PROJECT_NAME)\n"
 
-re: fclean _default
+re: fclean all
 
 .PHONY: all clean fclean re
-.SILENT:

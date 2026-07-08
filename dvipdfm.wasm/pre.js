@@ -4,17 +4,17 @@ var Module = {};
 self.memlog = "";
 self.mainfile = "main.tex";
 self.texlive_endpoint = "https://texlive2.swiftlatex.com/";
-Module['print'] = function(a) {
+Module['print'] = function (a) {
     self.memlog += (a + "\n");
     console.log(a);
 };
 
-Module['printErr'] = function(a) {
+Module['printErr'] = function (a) {
     self.memlog += (a + "\n");
     console.log(a);
 };
 
-Module['preRun'] = function() {
+Module['preRun'] = function () {
     FS.mkdir(TEXCACHEROOT);
     FS.mkdir(WORKROOT);
 };
@@ -22,7 +22,7 @@ Module['preRun'] = function() {
 function _allocate(content) {
     let res = _malloc(content.length);
     HEAPU8.set(new Uint8Array(content), res);
-    return res; 
+    return res;
 }
 
 function prepareExecutionContext() {
@@ -30,7 +30,7 @@ function prepareExecutionContext() {
     FS.chdir(WORKROOT);
 }
 
-Module['postRun'] = function() {
+Module['postRun'] = function () {
     self.postMessage({
         'result': 'ok',
     });
@@ -73,7 +73,7 @@ function cleanDir(dir) {
 
 
 
-Module['onAbort'] = function() {
+Module['onAbort'] = function () {
     self.memlog += 'Engine crashed';
     self.postMessage({
         'result': 'failed',
@@ -104,7 +104,7 @@ function compilePDFRoutine() {
                 'result': 'failed',
                 'status': status,
                 'log': self.memlog,
-                'cmd': 'compile'
+                'cmd': 'compilepdf'
             });
             return;
         }
@@ -113,7 +113,7 @@ function compilePDFRoutine() {
             'status': status,
             'log': self.memlog,
             'pdf': pdfArrayBuffer.buffer,
-            'cmd': 'compile'
+            'cmd': 'compilepdf'
         }, [pdfArrayBuffer.buffer]);
     } else {
         console.error("Compilation failed, with status code " + status);
@@ -121,7 +121,7 @@ function compilePDFRoutine() {
             'result': 'failed',
             'status': status,
             'log': self.memlog,
-            'cmd': 'compile'
+            'cmd': 'compilepdf'
         });
     }
 }
@@ -160,16 +160,101 @@ function writeFileRoutine(filename, content) {
     }
 }
 
+function writeTexFileRoutine(filename, content) {
+    try {
+        FS.writeFile(TEXCACHEROOT + "/" + filename, content);
+        self.postMessage({
+            'result': 'ok',
+            'cmd': 'writetexfile'
+        });
+    } catch (err) {
+        console.error("Unable to write mem file");
+        self.postMessage({
+            'result': 'failed',
+            'cmd': 'writetexfile'
+        });
+    }
+}
+
+function removeFileRoutine(filename) {
+    try {
+        const filePath = WORKROOT + '/' + filename;
+        if (FS.analyzePath(filePath).exists) {
+            FS.unlink(filePath);
+        }
+        self.postMessage({ result: 'ok', cmd: 'removefile' });
+    } catch (err) {
+        console.error('Unable to remove mem work file ' + filename, err);
+        self.postMessage({ result: 'failed', cmd: 'removefile' });
+    }
+}
+
+function transferTexFileToHost(filename) {
+    try {
+        let content = FS.readFile(TEXCACHEROOT + "/" + filename, {
+            encoding: 'binary'
+        });
+        self.postMessage({
+            'result': 'ok',
+            'cmd': 'fetchfile',
+            'filename': filename,
+            'content': content
+        }, [content.buffer]);
+    } catch (err) {
+        console.error("Unable to fetch mem file");
+        self.postMessage({
+            'result': 'failed',
+            'cmd': 'fetchfile'
+        });
+    }
+}
+
+function transferCacheDataToHost() {
+    try {
+        self.postMessage({
+            result: 'ok',
+            cmd: 'fetchcache',
+            texlive404: texlive404_cache,
+            texlive200: texlive200_cache,
+            font404: {},
+            font200: {},
+        });
+    } catch (err) {
+        console.error("Unable to fetch cache");
+        self.postMessage({
+            'result': 'failed',
+            'cmd': 'fetchcache'
+        });
+    }
+}
+
 function setTexliveEndpoint(url) {
-    if(url) {
+    if (url) {
         if (!url.endsWith("/")) {
             url += '/';
         }
         self.texlive_endpoint = url;
+        self.postMessage({
+            'result': 'ok',
+            'cmd': 'settexliveurl'
+        });
+    } else {
+        self.postMessage({
+            'result': 'failed',
+            'cmd': 'settexliveurl'
+        });
     }
+
 }
 
-self['onmessage'] = function(ev) {
+const unsupportedCommands = new Set([
+    "compilelatex",
+    "compileformat",
+    "fetchWorkFiles",
+    "removefile",
+]);
+
+self['onmessage'] = function (ev) {
     let data = ev['data'];
     let cmd = data['cmd'];
     if (cmd === 'compilepdf') {
@@ -182,11 +267,50 @@ self['onmessage'] = function(ev) {
         writeFileRoutine(data['url'], data['src']);
     } else if (cmd === "setmainfile") {
         self.mainfile = data['url'];
+        self.postMessage({
+            'result': 'ok',
+            'cmd': 'setmainfile'
+        });
     } else if (cmd === "grace") {
         console.error("Gracefully Close");
         self.close();
     } else if (cmd === "flushcache") {
+        cleanDir(TEXCACHEROOT);
         cleanDir(WORKROOT);
+        self.postMessage({
+            'result': 'ok',
+            'cmd': 'flushcache'
+        });
+    } else if (cmd === "flushworkcache") {
+        cleanDir(WORKROOT);
+        self.postMessage({
+            'result': 'ok',
+            'cmd': 'flushworkcache'
+        });
+    } else if (cmd === "fetchfile") {
+        transferTexFileToHost(data['fileName']);
+    } else if (cmd === "fetchcache") {
+        transferCacheDataToHost();
+    } else if (cmd === "writetexfile") {
+        writeTexFileRoutine(data['url'], data['src']);
+    } else if (cmd === "writecache") {
+        texlive404_cache = data['texlive404_cache'];
+        texlive200_cache = data['texlive200_cache'];
+        font404_cache = data['font404_cache'];
+        font200_cache = data['font200_cache'];
+        self.postMessage({
+            result: 'ok',
+            cmd: 'writecache'
+        });
+    } else if (cmd === "removefile") {
+        removeFileRoutine(data['url']);
+    } else if (unsupportedCommands.has(cmd)) {
+        console.error(`Command "${cmd}" is recognized but not supported in this environment.`);
+        self.postMessage({
+            result: "failed",
+            cmd,
+            error: `Command "${cmd}" is not supported in this environment.`,
+        });
     } else {
         console.error("Unknown command " + cmd);
     }
@@ -209,7 +333,7 @@ function kpse_find_file_impl(nameptr, format, _mustexist) {
         return 0;
     }
 
-    const cacheKey = format + "/" + reqname ;
+    const cacheKey = format + "/" + reqname;
 
     if (cacheKey in texlive404_cache) {
         return 0;
@@ -220,7 +344,7 @@ function kpse_find_file_impl(nameptr, format, _mustexist) {
         return _allocate(intArrayFromString(savepath));
     }
 
-    
+
     const remote_url = self.texlive_endpoint + 'xetex/' + cacheKey;
     let xhr = new XMLHttpRequest();
     xhr.open("GET", remote_url, false);
@@ -246,6 +370,6 @@ function kpse_find_file_impl(nameptr, format, _mustexist) {
         console.log("TexLive File not exists " + remote_url);
         texlive404_cache[cacheKey] = 1;
         return 0;
-    } 
+    }
     return 0;
 }
