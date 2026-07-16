@@ -15,17 +15,17 @@ CFLAGS := -O3 \
 	-DWEBASSEMBLY_BUILD
 
 LDFLAGS := -O3 \
-	-s ASYNCIFY \
-	-s ASYNCIFY_STACK_SIZE=16384 \
-	-s SINGLE_FILE=1 \
-	-s ENVIRONMENT=web,worker \
-	-s EXPORTED_FUNCTIONS='["_compileBibtex", "_compileLaTeX", "_compileFormat", "_main", "_setMainEntry", "_malloc", "_free"]' \
-	-s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap"]' \
-	-s NO_EXIT_RUNTIME=1 \
-	-s ALLOW_MEMORY_GROWTH=1 \
-	--js-library library.js \
-	--pre-js pre.js
-
+    -s SINGLE_FILE=1 \
+    -s ENVIRONMENT=web,worker \
+    -s EXPORTED_FUNCTIONS='["_compileBibtex", "_compileLaTeX", "_compileFormat", "_main", "_setMainEntry", "_malloc", "_free"]' \
+    -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap"]' \
+    -s NO_EXIT_RUNTIME=1 \
+    -s ALLOW_MEMORY_GROWTH=1 \
+    -s GROWABLE_ARRAYBUFFERS=0 \
+    -s TEXTDECODER=1 \
+    --js-library library.js \
+    --pre-js pre.js
+	
 TEXSOURCES := \
 	tex/pdftex0.c \
 	tex/pdftexini.c \

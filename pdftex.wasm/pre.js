@@ -5,6 +5,28 @@ self.memlog = "";
 self.initmem = undefined;
 self.mainfile = "main.tex";
 self.texlive_endpoint = "https://texlive2.swiftlatex.com/";
+
+self.onerror = function (message, source, lineno, colno, error) {
+    console.log("Worker error: ", message, source, lineno, colno, error);
+    self.postMessage({
+        cmd: "workererror",
+        message: String(message),
+        source,
+        lineno,
+        colno,
+        stack: error?.stack ?? null,
+    });
+};
+
+self.onunhandledrejection = function (event) {
+    console.log("Worker unhandled rejection: ", event);
+    self.postMessage({
+        cmd: "workerrejection",
+        reason: String(event.reason),
+        stack: event.reason?.stack ?? null,
+    });
+};
+
 Module['print'] = function (a) {
     self.memlog += (a + "\n");
 };
@@ -29,7 +51,6 @@ function dumpHeapMemory() {
     var src = wasmMemory.buffer;
     var dst = new Uint8Array(src.byteLength);
     dst.set(new Uint8Array(src));
-    // console.log("Dumping " + src.byteLength);
     return dst;
 }
 
@@ -76,7 +97,7 @@ function cleanDir(dir) {
         try {
             fsStat = FS.stat(item);
         } catch (err) {
-            console.error("Not able to fsstat " + item);
+            console.error("Not able to fsstat " + item, err);
             continue;
         }
         if (FS.isDir(fsStat.mode)) {
@@ -85,7 +106,7 @@ function cleanDir(dir) {
             try {
                 FS.unlink(item);
             } catch (err) {
-                console.error("Not able to unlink " + item);
+                console.error("Not able to unlink " + item, err);
             }
         }
     }
@@ -94,7 +115,7 @@ function cleanDir(dir) {
         try {
             FS.rmdir(dir);
         } catch (err) {
-            console.error("Not able to top level " + dir);
+            console.error("Not able to top level " + dir, err);
         }
     }
 }
@@ -165,7 +186,7 @@ function compileFormatRoutine() {
                 encoding: 'binary'
             });
         } catch (err) {
-            console.error("Fetch content failed.");
+            console.error("Fetch content failed.", err);
             status = -253;
             self.postMessage({
                 'result': 'failed',
@@ -195,14 +216,13 @@ function compileFormatRoutine() {
 
 function mkdirRoutine(dirname) {
     try {
-        //console.log("removing " + item);
         FS.mkdir(WORKROOT + "/" + dirname);
         self.postMessage({
             'result': 'ok',
             'cmd': 'mkdir'
         });
     } catch (err) {
-        console.error("Not able to mkdir " + dirname);
+        console.error("Not able to mkdir " + dirname, err);
         self.postMessage({
             'result': 'failed',
             'cmd': 'mkdir'
@@ -218,7 +238,7 @@ function writeFileRoutine(filename, content) {
             'cmd': 'writefile'
         });
     } catch (err) {
-        console.error("Unable to write mem file");
+        console.error("Unable to write mem file", err);
         self.postMessage({
             'result': 'failed',
             'cmd': 'writefile'
@@ -253,7 +273,7 @@ function writeTexFileRoutine(filename, content) {
             'cmd': 'writetexfile'
         });
     } catch (err) {
-        console.error("Unable to write mem file");
+        console.error("Unable to write mem file", err);
         self.postMessage({
             'result': 'failed',
             'cmd': 'writetexfile'
@@ -286,7 +306,7 @@ function transferTexFileToHost(filename) {
             'content': content
         }, [content.buffer]);
     } catch (err) {
-        console.error("Unable to fetch mem file");
+        console.error("Unable to fetch mem file", err);
         self.postMessage({
             'result': 'failed',
             'cmd': 'fetchfile'
@@ -301,11 +321,11 @@ function transferCacheDataToHost() {
             'cmd': 'fetchcache',
             'texlive404': texlive404_cache,
             'texlive200': texlive200_cache,
-            'font404': font404_cache,
-            'font200': font200_cache,
+            'font404': pk404_cache,
+            'font200': pk200_cache,
         });
     } catch (err) {
-        console.error("Unable to fetch cache");
+        console.error("Unable to fetch cache", err);
         self.postMessage({
             'result': 'failed',
             'cmd': 'fetchcache'
@@ -364,8 +384,8 @@ self['onmessage'] = function (ev) {
     } else if (cmd === "writecache") {
         texlive404_cache = data['texlive404_cache'];
         texlive200_cache = data['texlive200_cache'];
-        font404_cache = data['font404_cache'];
-        font200_cache = data['font200_cache'];
+        pk200_cache = data['font404_cache'];
+        pk404_cache = data['font200_cache'];
         self.postMessage({
             result: "ok",
             cmd: "writecache"
@@ -483,5 +503,4 @@ function kpse_find_pk_impl(nameptr, dpi) {
         return 0;
     }
     return 0;
-
 }

@@ -5,6 +5,28 @@ self.memlog = "";
 self.initmem = undefined;
 self.mainfile = "main.tex";
 self.texlive_endpoint = "https://texlive2.swiftlatex.com/";
+
+self.onerror = function (message, source, lineno, colno, error) {
+    console.log("Worker error: ", message, source, lineno, colno, error);
+    self.postMessage({
+        cmd: "workererror",
+        message: String(message),
+        source,
+        lineno,
+        colno,
+        stack: error?.stack ?? null,
+    });
+};
+
+self.onunhandledrejection = function (event) {
+    console.log("Worker unhandled rejection: ", event);
+    self.postMessage({
+        cmd: "workerrejection",
+        reason: String(event.reason),
+        stack: event.reason?.stack ?? null,
+    });
+};
+
 Module['print'] = function (a) {
     self.memlog += (a + "\n");
 };
@@ -76,7 +98,7 @@ function cleanDir(dir) {
         try {
             fsStat = FS.stat(item);
         } catch (err) {
-            console.error("Not able to fsstat " + item);
+            console.error("Not able to fsstat " + item, err);
             continue;
         }
         if (FS.isDir(fsStat.mode)) {
@@ -85,7 +107,7 @@ function cleanDir(dir) {
             try {
                 FS.unlink(item);
             } catch (err) {
-                console.error("Not able to unlink " + item);
+                console.error("Not able to unlink " + item, err);
             }
         }
     }
@@ -94,7 +116,7 @@ function cleanDir(dir) {
         try {
             FS.rmdir(dir);
         } catch (err) {
-            console.error("Not able to top level " + dir);
+            console.error("Not able to top level " + dir, err);
         }
     }
 }
@@ -127,7 +149,7 @@ function compileLaTeXRoutine() {
                 encoding: 'binary'
             });
         } catch (err) {
-            console.error("Fetch content failed. " + pdfurl);
+            console.error("Fetch content failed. " + pdfurl, err);
             status = -253;
             self.postMessage({
                 'result': 'failed',
@@ -166,7 +188,7 @@ function compileFormatRoutine() {
                 encoding: 'binary'
             });
         } catch (err) {
-            console.error("Fetch content failed.");
+            console.error("Fetch content failed.", err);
             status = -253;
             self.postMessage({
                 'result': 'failed',
@@ -203,7 +225,7 @@ function mkdirRoutine(dirname) {
             'cmd': 'mkdir'
         });
     } catch (err) {
-        console.error("Not able to mkdir " + dirname);
+        console.error("Not able to mkdir " + dirname, err);
         self.postMessage({
             'result': 'failed',
             'cmd': 'mkdir'
@@ -219,7 +241,7 @@ function writeFileRoutine(filename, content) {
             'cmd': 'writefile'
         });
     } catch (err) {
-        console.error("Unable to write mem file");
+        console.error("Unable to write mem file", err);
         self.postMessage({
             'result': 'failed',
             'cmd': 'writefile'
@@ -235,7 +257,7 @@ function writeTexFileRoutine(filename, content) {
             'cmd': 'writetexfile'
         });
     } catch (err) {
-        console.error("Unable to write mem file");
+        console.error("Unable to write mem file", err);
         self.postMessage({
             'result': 'failed',
             'cmd': 'writetexfile'
@@ -268,7 +290,7 @@ function transferTexFileToHost(filename) {
             'content': content
         }, [content.buffer]);
     } catch (err) {
-        console.error("Unable to fetch mem file");
+        console.error("Unable to fetch mem file", err);
         self.postMessage({
             'result': 'failed',
             'cmd': 'fetchfile'
@@ -287,7 +309,7 @@ function transferCacheDataToHost() {
             'font200': font200_cache,
         });
     } catch (err) {
-        console.error("Unable to fetch cache");
+        console.error("Unable to fetch cache", err);
         self.postMessage({
             'result': 'failed',
             'cmd': 'fetchcache'
