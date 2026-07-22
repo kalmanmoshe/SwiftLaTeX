@@ -112,7 +112,7 @@ function cleanDir(dir) {
         }
     }
 
-    if (dir !== WORKROOT) {
+    if (dir !== WORKROOT && dir !== TEXCACHEROOT) {
         try {
             FS.rmdir(dir);
         } catch (err) {
@@ -218,7 +218,6 @@ function compileFormatRoutine() {
 
 function mkdirRoutine(dirname) {
     try {
-        //console.log("removing " + item);
         FS.mkdir(WORKROOT + "/" + dirname);
         self.postMessage({
             'result': 'ok',
@@ -290,7 +289,7 @@ function transferTexFileToHost(filename) {
             'content': content
         }, [content.buffer]);
     } catch (err) {
-        console.error("Unable to fetch mem file", err);
+        console.error("Unable to fetch mem file " + filename, err);
         self.postMessage({
             'result': 'failed',
             'cmd': 'fetchfile'
@@ -365,6 +364,8 @@ self['onmessage'] = function (ev) {
     } else if (cmd === "flushcache") {
         cleanDir(TEXCACHEROOT);
         cleanDir(WORKROOT);
+        texlive200_cache = {};
+        font200_cache = {};
         self.postMessage({
             'result': 'ok',
             'cmd': 'flushcache'

@@ -111,7 +111,7 @@ function cleanDir(dir) {
         }
     }
 
-    if (dir !== WORKROOT) {
+    if (dir !== WORKROOT && dir !== TEXCACHEROOT) {
         try {
             FS.rmdir(dir);
         } catch (err) {
@@ -306,7 +306,7 @@ function transferTexFileToHost(filename) {
             'content': content
         }, [content.buffer]);
     } catch (err) {
-        console.error("Unable to fetch mem file", err);
+        console.error("Unable to fetch mem file " + filename, err);
         self.postMessage({
             'result': 'failed',
             'cmd': 'fetchfile'
@@ -363,6 +363,8 @@ self['onmessage'] = function (ev) {
     } else if (cmd === "flushcache") {
         cleanDir(TEXCACHEROOT);
         cleanDir(WORKROOT);
+        texlive200_cache = {};
+        pk200_cache = {};
         self.postMessage({
             'result': 'ok',
             'cmd': 'flushcache'
@@ -384,8 +386,8 @@ self['onmessage'] = function (ev) {
     } else if (cmd === "writecache") {
         texlive404_cache = data['texlive404_cache'];
         texlive200_cache = data['texlive200_cache'];
-        pk200_cache = data['font404_cache'];
-        pk404_cache = data['font200_cache'];
+        pk200_cache = data['font200_cache'];
+        pk404_cache = data['font404_cache'];
         self.postMessage({
             result: "ok",
             cmd: "writecache"
