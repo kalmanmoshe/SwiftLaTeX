@@ -23,8 +23,10 @@ LDFLAGS := -O3 \
 	-s ENVIRONMENT=web,worker \
 	-s EXPORTED_FUNCTIONS='["_compileBibtex", "_compileLaTeX", "_compileFormat", "_main", "_setMainEntry", "_malloc", "_free"]' \
 	-s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap"]' \
-	-s NO_EXIT_RUNTIME=1 \
-	-s ALLOW_MEMORY_GROWTH=1 \
+    -s NO_EXIT_RUNTIME=1 \
+    -s ALLOW_MEMORY_GROWTH=1 \
+    -s GROWABLE_ARRAYBUFFERS=0 \
+    -s TEXTDECODER=1 \
 	--js-library library.js \
 	--pre-js pre.js
 
