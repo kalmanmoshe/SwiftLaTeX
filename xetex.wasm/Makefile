@@ -5,6 +5,10 @@ CXX := em++
 
 BUILD_DIR := build
 
+PRE_COMMON := ../common/pre.js
+PRE_ENGINE := pre.js
+PRE_GENERATED := $(BUILD_DIR)/pre.generated.js
+
 CFLAGS := -O3 \
 	-Wno-parentheses-equality \
 	-Wno-pointer-sign \
@@ -28,7 +32,7 @@ LDFLAGS := -O3 \
     -s GROWABLE_ARRAYBUFFERS=0 \
     -s TEXTDECODER=1 \
 	--js-library library.js \
-	--pre-js pre.js
+	--pre-js $(PRE_GENERATED)
 
 TEXSOURCES := \
 	tex/xetex0.c \
@@ -68,7 +72,18 @@ TECKITOBJECTS := $(TECKITSOURCES:%.cpp=$(BUILD_DIR)/%.o)
 
 all: $(PROJECT_NAME)
 
-$(PROJECT_NAME): $(TEXOBJECTS) $(XETEXOBJECTS) $(TECKITOBJECTS)
+$(PRE_GENERATED): $(PRE_COMMON) $(PRE_ENGINE)
+	@mkdir -p $(@D)
+	@printf '%s\n' \
+		'/* AUTO-GENERATED FILE. DO NOT EDIT DIRECTLY. */' \
+		'/* Sources: ../common/pre.js + xetex.wasm/pre.js */' \
+		'' > $@
+	@cat $(PRE_COMMON) >> $@
+	@printf '\n\n' >> $@
+	@cat $(PRE_ENGINE) >> $@
+	@printf "\033[32m[GENERATED]\033[0m $@\n"
+
+$(PROJECT_NAME): $(PRE_GENERATED) $(TEXOBJECTS) $(XETEXOBJECTS) $(TECKITOBJECTS)
 	@$(CXX) -o $@ $(LDFLAGS) \
 		$(TEXOBJECTS) $(XETEXOBJECTS) $(TECKITOBJECTS) \
 		xpdf/xpdf.a graphite2/libgraphite2.a harfbuzz/libharfbuzz.a

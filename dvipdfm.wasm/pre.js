@@ -1,396 +1,99 @@
-const TEXCACHEROOT = "/tex";
-const WORKROOT = "/work";
-var Module = {};
-self.memlog = "";
-self.mainfile = "main.tex";
-self.texlive_endpoint = "https://texlive2.swiftlatex.com/";
-
-self.onerror = function (message, source, lineno, colno, error) {
-    console.log("Worker error: ", message, source, lineno, colno, error);
-    self.postMessage({
-        cmd: "workererror",
-        message: String(message),
-        source,
-        lineno,
-        colno,
-        stack: error?.stack ?? null,
-    });
-};
-
-self.onunhandledrejection = function (event) {
-    console.log("Worker unhandled rejection: ", event);
-    self.postMessage({
-        cmd: "workerrejection",
-        reason: String(event.reason),
-        stack: event.reason?.stack ?? null,
-    });
-};
-
-Module['print'] = function (a) {
-    self.memlog += (a + "\n");
-    console.log(a);
-};
-
-Module['printErr'] = function (a) {
-    self.memlog += (a + "\n");
-    console.log(a);
-};
-
-Module['preRun'] = function () {
-    FS.mkdir(TEXCACHEROOT);
-    FS.mkdir(WORKROOT);
-};
-
-function _allocate(content) {
-    let res = _malloc(content.length);
-    HEAPU8.set(new Uint8Array(content), res);
-    return res;
-}
-
-function prepareExecutionContext() {
-    self.memlog = '';
-    FS.chdir(WORKROOT);
-}
-
-Module['postRun'] = function () {
-    self.postMessage({
-        'result': 'ok',
-    });
-};
-
-function cleanDir(dir) {
-    let l = FS.readdir(dir);
-    for (let i in l) {
-        let item = l[i];
-        if (item === "." || item === "..") {
-            continue;
-        }
-        item = dir + "/" + item;
-        let fsStat = undefined;
-        try {
-            fsStat = FS.stat(item);
-        } catch (err) {
-            console.error("Not able to fsstat " + item, err);
-            continue;
-        }
-        if (FS.isDir(fsStat.mode)) {
-            cleanDir(item);
-        } else {
-            try {
-                FS.unlink(item);
-            } catch (err) {
-                console.error("Not able to unlink " + item, err);
-            }
-        }
-    }
-
-    if (dir !== WORKROOT && dir !== TEXCACHEROOT) {
-        try {
-            FS.rmdir(dir);
-        } catch (err) {
-            console.error("Not able to top level " + dir, err);
-        }
-    }
-}
-
-
-
-Module['onAbort'] = function () {
-    self.memlog += 'Engine crashed';
-    self.postMessage({
-        'result': 'failed',
-        'status': -254,
-        'log': self.memlog,
-        'cmd': 'compile'
-    });
-    return;
-};
-
+let texlive404Cache = {};
+let texlive200Cache = {};
 
 function compilePDFRoutine() {
     prepareExecutionContext();
-    const setMainFunction = cwrap('setMainEntry', 'number', ['string']);
-    setMainFunction(self.mainfile);
-    let status = _compilePDF();
-    if (status === 0) {
-        let pdfArrayBuffer = null;
-        try {
-            let pdfurl = WORKROOT + "/" + self.mainfile.substr(0, self.mainfile.length - 4) + ".pdf"
-            pdfArrayBuffer = FS.readFile(pdfurl, {
-                encoding: 'binary'
-            });
-        } catch (err) {
-            console.error("Fetch content failed.", err);
-            status = -253;
-            self.postMessage({
-                'result': 'failed',
-                'status': status,
-                'log': self.memlog,
-                'cmd': 'compilepdf'
-            });
-            return;
-        }
-        self.postMessage({
-            'result': 'ok',
-            'status': status,
-            'log': self.memlog,
-            'pdf': pdfArrayBuffer.buffer,
-            'cmd': 'compilepdf'
-        }, [pdfArrayBuffer.buffer]);
-    } else {
-        console.error("Compilation failed, with status code " + status);
-        self.postMessage({
-            'result': 'failed',
-            'status': status,
-            'log': self.memlog,
-            'cmd': 'compilepdf'
-        });
-    }
+
+    const setMainEntry = cwrap(
+        "setMainEntry",
+        "number",
+        ["string"],
+    );
+
+    setMainEntry(self.mainfile);
+
+    const status = _compilePDF();
+
+    const outputName = self.mainfile.replace(
+        /\.[^.]+$/i,
+        ".pdf",
+    );
+
+    sendCompilationOutput({
+        status,
+        outputPath: `${WORKROOT}/${outputName}`,
+        command: "compilepdf",
+        outputProperty: "pdf",
+    });
 }
 
+function kpse_find_file_impl(
+    namePointer,
+    format,
+    _mustExist,
+) {
+    let requestedName = UTF8ToString(namePointer);
 
-function mkdirRoutine(dirname) {
-    try {
-        //console.log("removing " + item);
-        FS.mkdir(WORKROOT + "/" + dirname);
-        self.postMessage({
-            'result': 'ok',
-            'cmd': 'mkdir'
-        });
-    } catch (err) {
-        console.error("Not able to mkdir " + dirname, err);
-        self.postMessage({
-            'result': 'failed',
-            'cmd': 'mkdir'
-        });
+    /*
+     * The DVIPDFMx engine can request paths beginning with /tex/.
+     * Files are already stored under TEXCACHEROOT, so remove this
+     * prefix before creating the remote cache key.
+     */
+    if (requestedName.startsWith("/tex/")) {
+        requestedName = requestedName.slice(5);
     }
+
+    if (requestedName.includes("/")) {
+        return 0;
+    }
+
+    const cacheKey = `${format}/${requestedName}`;
+
+    return downloadRemoteFile({
+        cacheKey,
+        successfulCache: texlive200Cache,
+        missingCache: texlive404Cache,
+        remotePath: `xetex/${cacheKey}`,
+        responseHeader: "fileid",
+    });
 }
 
-function writeFileRoutine(filename, content) {
-    try {
-        FS.writeFile(WORKROOT + "/" + filename, content);
-        self.postMessage({
-            'result': 'ok',
-            'cmd': 'writefile'
-        });
-    } catch (err) {
-        console.error("Unable to write mem file", err);
-        self.postMessage({
-            'result': 'failed',
-            'cmd': 'writefile'
-        });
-    }
-}
+initializeWorker({
+    name: "dvipdfm",
 
-function writeTexFileRoutine(filename, content) {
-    try {
-        FS.writeFile(TEXCACHEROOT + "/" + filename, content);
-        self.postMessage({
-            'result': 'ok',
-            'cmd': 'writetexfile'
-        });
-    } catch (err) {
-        console.error("Unable to write mem file", err);
-        self.postMessage({
-            'result': 'failed',
-            'cmd': 'writetexfile'
-        });
-    }
-}
+    commandHandlers: {
+        compilepdf() {
+            compilePDFRoutine();
+        },
+    },
 
-function removeFileRoutine(filename) {
-    try {
-        const filePath = WORKROOT + '/' + filename;
-        if (FS.analyzePath(filePath).exists) {
-            FS.unlink(filePath);
-        }
-        self.postMessage({ result: 'ok', cmd: 'removefile' });
-    } catch (err) {
-        console.error('Unable to remove mem work file ' + filename, err);
-        self.postMessage({ result: 'failed', cmd: 'removefile' });
-    }
-}
+    unsupportedCommands: [
+        "compilelatex",
+        "compileformat",
+        "fetchWorkFiles",
+    ],
 
-function transferTexFileToHost(filename) {
-    try {
-        let content = FS.readFile(TEXCACHEROOT + "/" + filename, {
-            encoding: 'binary'
-        });
-        self.postMessage({
-            'result': 'ok',
-            'cmd': 'fetchfile',
-            'filename': filename,
-            'content': content
-        }, [content.buffer]);
-    } catch (err) {
-        console.error("Unable to fetch mem file " + filename, err);
-        self.postMessage({
-            'result': 'failed',
-            'cmd': 'fetchfile'
-        });
-    }
-}
+    getCacheData() {
+        return {
+            texlive404: texlive404Cache,
+            texlive200: texlive200Cache,
 
-function transferCacheDataToHost() {
-    try {
-        self.postMessage({
-            result: 'ok',
-            cmd: 'fetchcache',
-            texlive404: texlive404_cache,
-            texlive200: texlive200_cache,
+            // DVIPDFMx has no separate font cache.
             font404: {},
             font200: {},
-        });
-    } catch (err) {
-        console.error("Unable to fetch cache", err);
-        self.postMessage({
-            'result': 'failed',
-            'cmd': 'fetchcache',
-        });
-    }
-}
+        };
+    },
 
-function setTexliveEndpoint(url) {
-    if (url) {
-        if (!url.endsWith("/")) {
-            url += '/';
-        }
-        self.texlive_endpoint = url;
-        self.postMessage({
-            'result': 'ok',
-            'cmd': 'settexliveurl'
-        });
-    } else {
-        self.postMessage({
-            'result': 'failed',
-            'cmd': 'settexliveurl'
-        });
-    }
+    setCacheData(data) {
+        texlive404Cache =
+            data.texlive404_cache ?? {};
 
-}
+        texlive200Cache =
+            data.texlive200_cache ?? {};
+    },
 
-const unsupportedCommands = new Set([
-    "compilelatex",
-    "compileformat",
-    "fetchWorkFiles",
-    "removefile",
-]);
-
-self['onmessage'] = function (ev) {
-    let data = ev['data'];
-    let cmd = data['cmd'];
-    if (cmd === 'compilepdf') {
-        compilePDFRoutine();
-    } else if (cmd === "mkdir") {
-        mkdirRoutine(data['url']);
-    } else if (cmd === "settexliveurl") {
-        setTexliveEndpoint(data['url']);
-    } else if (cmd === "writefile") {
-        writeFileRoutine(data['url'], data['src']);
-    } else if (cmd === "setmainfile") {
-        self.mainfile = data['url'];
-        self.postMessage({
-            'result': 'ok',
-            'cmd': 'setmainfile'
-        });
-    } else if (cmd === "grace") {
-        console.error("Gracefully Close");
-        self.close();
-    } else if (cmd === "flushcache") {
-        cleanDir(TEXCACHEROOT);
-        cleanDir(WORKROOT);
-        texlive200_cache = {};
-        self.postMessage({
-            'result': 'ok',
-            'cmd': 'flushcache'
-        });
-    } else if (cmd === "flushworkcache") {
-        cleanDir(WORKROOT);
-        self.postMessage({
-            'result': 'ok',
-            'cmd': 'flushworkcache'
-        });
-    } else if (cmd === "fetchfile") {
-        transferTexFileToHost(data['fileName']);
-    } else if (cmd === "fetchcache") {
-        transferCacheDataToHost();
-    } else if (cmd === "writetexfile") {
-        writeTexFileRoutine(data['url'], data['src']);
-    } else if (cmd === "writecache") {
-        texlive404_cache = data['texlive404_cache'];
-        texlive200_cache = data['texlive200_cache'];
-        self.postMessage({
-            result: 'ok',
-            cmd: 'writecache'
-        });
-    } else if (cmd === "removefile") {
-        removeFileRoutine(data['url']);
-    } else if (unsupportedCommands.has(cmd)) {
-        console.error(`Command "${cmd}" is recognized but not supported in this environment.`);
-        self.postMessage({
-            result: "failed",
-            cmd,
-            error: `Command "${cmd}" is not supported in this environment.`,
-        });
-    } else {
-        console.error("Unknown command " + cmd);
-    }
-};
-
-let texlive404_cache = {};
-let texlive200_cache = {};
-
-function kpse_find_file_impl(nameptr, format, _mustexist) {
-
-    let reqname = UTF8ToString(nameptr);
-
-    // It is a hack , since webassembly version latex engine stores 
-    // all templates file inside /tex/, therefore, we have to fetch it again
-    if (reqname.startsWith("/tex/")) {
-        reqname = reqname.substr(5);
-    }
-
-    if (reqname.includes("/")) {
-        return 0;
-    }
-
-    const cacheKey = format + "/" + reqname;
-
-    if (cacheKey in texlive404_cache) {
-        return 0;
-    }
-
-    if (cacheKey in texlive200_cache) {
-        const savepath = texlive200_cache[cacheKey];
-        return _allocate(intArrayFromString(savepath));
-    }
-
-
-    const remote_url = self.texlive_endpoint + 'xetex/' + cacheKey;
-    let xhr = new XMLHttpRequest();
-    xhr.open("GET", remote_url, false);
-    xhr.timeout = 150000;
-    xhr.responseType = "arraybuffer";
-    console.log("Start downloading texlive file " + remote_url);
-    try {
-        xhr.send();
-    } catch (err) {
-        console.log("TexLive Download Failed " + remote_url);
-        return 0;
-    }
-
-    if (xhr.status === 200) {
-        let arraybuffer = xhr.response;
-        const fileid = xhr.getResponseHeader('fileid');
-        const savepath = TEXCACHEROOT + "/" + fileid;
-        FS.writeFile(savepath, new Uint8Array(arraybuffer));
-        texlive200_cache[cacheKey] = savepath;
-        return _allocate(intArrayFromString(savepath));
-
-    } else if (xhr.status === 301) {
-        console.log("TexLive File not exists " + remote_url);
-        texlive404_cache[cacheKey] = 1;
-        return 0;
-    }
-    return 0;
-}
+    clearCaches() {
+        texlive404Cache = {};
+        texlive200Cache = {};
+    },
+});

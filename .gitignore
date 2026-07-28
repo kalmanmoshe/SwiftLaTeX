@@ -1,4 +1,6 @@
 *.o
+*.generated.js
+
 swiftlatexxetex.wasm
 swiftlatexxetex.js
 swiftlatexxetex.worker.js

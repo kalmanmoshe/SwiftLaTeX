@@ -5,6 +5,10 @@ CXX := em++
 
 BUILD_DIR := build
 
+PRE_COMMON := ../common/pre.js
+PRE_ENGINE := pre.js
+PRE_GENERATED := $(BUILD_DIR)/pre.generated.js
+
 CFLAGS := -O3 \
 	-s USE_ZLIB=1 \
 	-s USE_LIBPNG=1 \
@@ -24,7 +28,7 @@ LDFLAGS := -O3 \
     -s GROWABLE_ARRAYBUFFERS=0 \
     -s TEXTDECODER=1 \
     --js-library library.js \
-    --pre-js pre.js
+    --pre-js $(PRE_GENERATED)
 	
 TEXSOURCES := \
 	tex/pdftex0.c \
@@ -69,7 +73,18 @@ EPDFOBJECTS := $(EPDFSOURCES:%.cc=$(BUILD_DIR)/%.o)
 
 all: $(PROJECT_NAME)
 
-$(PROJECT_NAME): $(TEXOBJECTS) $(PDFOBJECTS) $(EPDFOBJECTS)
+$(PRE_GENERATED): $(PRE_COMMON) $(PRE_ENGINE)
+	@mkdir -p $(@D)
+	@printf '%s\n' \
+		'/* AUTO-GENERATED FILE. DO NOT EDIT DIRECTLY. */' \
+		'/* Sources: ../common/pre.js + pdftex.wasm/pre.js */' \
+		'' > $@
+	@cat $(PRE_COMMON) >> $@
+	@printf '\n\n' >> $@
+	@cat $(PRE_ENGINE) >> $@
+	@printf "\033[32m[GENERATED]\033[0m $@\n"
+
+$(PROJECT_NAME): $(PRE_GENERATED) $(TEXOBJECTS) $(PDFOBJECTS) $(EPDFOBJECTS)
 	@$(CXX) -o $@ $(CFLAGS) $(LDFLAGS) \
 		$(TEXOBJECTS) $(PDFOBJECTS) $(EPDFOBJECTS) \
 		xpdf/xpdf.a
