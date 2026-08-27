@@ -1,61 +1,78 @@
 let texlive404Cache = {};
 let texlive200Cache = {};
 
-function compilePDFRoutine() {
-    prepareExecutionContext();
+async function compilePDFRoutine() {
+    try {
+        prepareExecutionContext();
 
-    const setMainEntry = cwrap(
-        "setMainEntry",
-        "number",
-        ["string"],
-    );
+        const setMainEntry = cwrap(
+            "setMainEntry",
+            "number",
+            ["string"],
+        );
 
-    setMainEntry(self.mainfile);
+        setMainEntry(self.mainfile);
 
-    const status = _compilePDF();
+        const status = await ccall(
+            "compilePDF",
+            "number",
+            [],
+            [],
+            {
+                async: true,
+            },
+        );
 
-    const outputName = self.mainfile.replace(
-        /\.[^.]+$/i,
-        ".pdf",
-    );
+        const outputName = self.mainfile.replace(
+            /\.[^.]+$/i,
+            ".pdf",
+        );
 
-    sendCompilationOutput({
-        status,
-        outputPath: `${WORKROOT}/${outputName}`,
-        command: "compilepdf",
-        outputProperty: "pdf",
-    });
+        sendCompilationOutput({
+            status,
+            outputPath: `${WORKROOT}/${outputName}`,
+            command: "compilepdf",
+            outputProperty: "pdf",
+        });
+    } finally {
+        clearHostResolutionCaches();
+    }
 }
 
-function kpse_find_file_impl(
+async function kpse_find_file_impl(
     namePointer,
-    format,
-    _mustExist,
+    format
 ) {
-    let requestedName = UTF8ToString(namePointer);
+    let requestedPath =
+        UTF8ToString(namePointer);
 
-    /*
-     * The DVIPDFMx engine can request paths beginning with /tex/.
-     * Files are already stored under TEXCACHEROOT, so remove this
-     * prefix before creating the remote cache key.
-     */
-    if (requestedName.startsWith("/tex/")) {
-        requestedName = requestedName.slice(5);
+    if (requestedPath.startsWith("/tex/")) {
+        requestedPath =
+            requestedPath.slice(5);
     }
 
-    if (requestedName.includes("/")) {
-        return 0;
-    }
-
-    const cacheKey = `${format}/${requestedName}`;
-
-    return downloadRemoteFile({
-        cacheKey,
-        successfulCache: texlive200Cache,
-        missingCache: texlive404Cache,
-        remotePath: `xetex/${cacheKey}`,
-        responseHeader: "fileid",
+    console.log("DVI FILE REQUEST", {
+        requestedPath,
+        format,
     });
+
+    const resolvedPath = await resolveFile({
+        requestedPath,
+        requestingPath: null,
+        format,
+        mustExist: false,
+
+        remoteConfig: {
+            successfulCache: texlive200Cache,
+            missingCache: texlive404Cache,
+            pathPrefix: "xetex",
+            responseHeader: "fileid",
+        },
+    });
+
+    return resolvedPath
+        ? allocateString(resolvedPath)
+        : 0;
 }
 
 initializeWorker({
@@ -85,11 +102,8 @@ initializeWorker({
     },
 
     setCacheData(data) {
-        texlive404Cache =
-            data.texlive404_cache ?? {};
-
-        texlive200Cache =
-            data.texlive200_cache ?? {};
+        texlive404Cache = data.texlive404_cache ?? {};
+        texlive200Cache = data.texlive200_cache ?? {};
     },
 
     clearCaches() {

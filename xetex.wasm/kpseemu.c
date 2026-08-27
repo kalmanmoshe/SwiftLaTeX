@@ -187,10 +187,106 @@ int xfclose(FILE *stream, const_string filename) {
   return 0;
 }
 
+static char *tex_string_to_utf8(strnumber s) {
+    if (s < 65536 || s >= strptr) {
+        return NULL;
+    }
 
+    poolpointer start = strstart[s - 65536];
+    poolpointer end = strstart[s + 1 - 65536];
 
-extern char* kpse_find_file_js(const char* name, kpse_file_format_type format,
-                     boolean must_exist);
+    /*
+     * Worst case for one Unicode scalar in UTF-8 is 4 bytes.
+     * XeTeX's strpool contains UTF-16 code units, so this is
+     * comfortably large enough.
+     */
+    size_t capacity = (size_t)(end - start) * 4 + 1;
+    char *result = malloc(capacity);
+
+    if (!result) {
+        return NULL;
+    }
+
+    size_t out = 0;
+
+    for (poolpointer i = start; i < end; i++) {
+        uint32_t c = strpool[i];
+
+        /*
+         * UTF-16 surrogate pair.
+         */
+        if (
+            c >= 0xD800 &&
+            c <= 0xDBFF &&
+            i + 1 < end
+        ) {
+            uint32_t low = strpool[i + 1];
+
+            if (low >= 0xDC00 && low <= 0xDFFF) {
+                c =
+                    0x10000 +
+                    ((c - 0xD800) << 10) +
+                    (low - 0xDC00);
+
+                i++;
+            }
+        }
+
+        if (c <= 0x7F) {
+            result[out++] = (char)c;
+        } else if (c <= 0x7FF) {
+            result[out++] =
+                (char)(0xC0 | (c >> 6));
+
+            result[out++] =
+                (char)(0x80 | (c & 0x3F));
+        } else if (c <= 0xFFFF) {
+            result[out++] =
+                (char)(0xE0 | (c >> 12));
+
+            result[out++] =
+                (char)(0x80 | ((c >> 6) & 0x3F));
+
+            result[out++] =
+                (char)(0x80 | (c & 0x3F));
+        } else {
+            result[out++] =
+                (char)(0xF0 | (c >> 18));
+
+            result[out++] =
+                (char)(0x80 | ((c >> 12) & 0x3F));
+
+            result[out++] =
+                (char)(0x80 | ((c >> 6) & 0x3F));
+
+            result[out++] =
+                (char)(0x80 | (c & 0x3F));
+        }
+    }
+
+    result[out] = '\0';
+
+    return result;
+}
+
+static char *get_current_input_file(void) {
+  
+  if (inopen <= 0) {
+      return NULL;
+  }
+
+  strnumber source =
+      fullsourcefilenamestack[inopen];
+
+  return tex_string_to_utf8(source);
+}
+
+extern char* kpse_find_file_js(
+    const char* name,
+    kpse_file_format_type format,
+    boolean must_exist,
+    const char* requesting_file
+);
 
 static void fix_extension(char *local_name, int format) {
 #define SUFFIX(suf) strcat(local_name, suf);
@@ -335,8 +431,11 @@ static void fix_extension(char *local_name, int format) {
 }
 
 #define MAX_PATH_LEN 256
-char* kpse_find_file(const char* name, kpse_file_format_type format,
-                     boolean must_exist) {
+char* kpse_find_file(
+  const char* name, 
+  kpse_file_format_type format,   
+  boolean must_exist
+) {
   if (name == NULL) {
     return NULL;
   }
@@ -367,6 +466,21 @@ char* kpse_find_file(const char* name, kpse_file_format_type format,
   free(local_name);
 
   // Head to network search
-  return kpse_find_file_js(name, format, must_exist);
+  char *requesting_file =
+    get_current_input_file();
+
+  char *result =
+      kpse_find_file_js(
+          name,
+          format,
+          must_exist,
+          requesting_file
+      );
+
+  if (requesting_file) {
+      free(requesting_file);
+  }
+  
+  return result;
 
 }

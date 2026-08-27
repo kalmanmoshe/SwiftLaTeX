@@ -20,6 +20,7 @@ LDFLAGS := -O3 \
 	-s USE_LIBPNG=1 \
 	-s SINGLE_FILE=1 \
 	-s ENVIRONMENT=web,worker \
+	-s ASYNCIFY=1 \
 	-s EXPORTED_FUNCTIONS='["_compilePDF", "_setMainEntry", "_main", "_malloc", "_free"]' \
 	-s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap"]' \
     -s NO_EXIT_RUNTIME=1 \

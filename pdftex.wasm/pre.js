@@ -4,32 +4,53 @@ let texlive200Cache = {};
 let pk404Cache = {};
 let pk200Cache = {};
 
-function compileLaTeXRoutine() {
-    prepareExecutionContext();
+async function compileLaTeXRoutine() {
+    try {
+        prepareExecutionContext();
 
-    const setMainEntry = cwrap(
-        "setMainEntry",
-        "number",
-        ["string"],
-    );
+        const setMainEntry = cwrap(
+            "setMainEntry",
+            "number",
+            ["string"],
+        );
 
-    setMainEntry(self.mainfile);
+        setMainEntry(
+            self.mainfile
+        );
 
-    let status = _compileLaTeX();
+        let status =
+            await ccall(
+                "compileLaTeX",
+                "number",
+                [],
+                [],
+                {
+                    async: true,
+                },
+            );
 
-    if (status === 0) {
-        _compileBibtex();
+        if (status === 0) {
+            _compileBibtex();
+        }
+
+        const outputName =
+            self.mainfile.replace(
+                /\.tex$/i,
+                ".pdf"
+            );
+
+        sendCompilationOutput({
+            status,
+            outputPath:
+                `${WORKROOT}/${outputName}`,
+            command:
+                "compilelatex",
+            outputProperty:
+                "pdf",
+        });
+    } finally {
+        clearHostResolutionCaches();
     }
-
-    const outputName =
-        self.mainfile.replace(/\.tex$/i, ".pdf");
-
-    sendCompilationOutput({
-        status,
-        outputPath: `${WORKROOT}/${outputName}`,
-        command: "compilelatex",
-        outputProperty: "pdf",
-    });
 }
 
 function compileFormatRoutine() {
@@ -45,39 +66,45 @@ function compileFormatRoutine() {
     });
 }
 
-function kpse_find_file_impl(
+async function kpse_find_file_impl(
     namePointer,
     format,
-    _mustExist,
+    mustExist,
+    requestingFilePointer
 ) {
-    const requestedName = UTF8ToString(namePointer);
+    const requestedPath =  UTF8ToString(namePointer);
 
-    if (requestedName.includes("/")) {
-        return 0;
-    }
+    const requestingPath = requestingFilePointer ? UTF8ToString(requestingFilePointer) : null;
 
-    const cacheKey =
-        `${format}/${requestedName}`;
+    const resolvedPath =
+        await resolveFile({
+            requestedPath,
+            requestingPath,
+            format,
+            mustExist:
+                Boolean(mustExist),
 
-    return downloadRemoteFile({
-        cacheKey,
-        successfulCache: texlive200Cache,
-        missingCache: texlive404Cache,
-        remotePath: `pdftex/${cacheKey}`,
-        responseHeader: "fileid",
-    });
+            remoteConfig: {
+                successfulCache: texlive200Cache,
+                missingCache: texlive404Cache,
+                pathPrefix: "pdftex",
+                responseHeader: "fileid",
+            },
+        });
+
+    return resolvedPath ? allocateString(resolvedPath) : 0;
 }
 
 function kpse_find_pk_impl(namePointer, dpi) {
-    const requestedName =
+    const requestedPath =
         UTF8ToString(namePointer);
 
-    if (requestedName.includes("/")) {
+    if (requestedPath.includes("/")) {
         return 0;
     }
 
     const cacheKey =
-        `${dpi}/${requestedName}`;
+        `${dpi}/${requestedPath}`;
 
     return downloadRemoteFile({
         cacheKey,
@@ -93,7 +120,7 @@ initializeWorker({
 
     commandHandlers: {
         compilelatex() {
-            compileLaTeXRoutine();
+            void compileLaTeXRoutine();
         },
 
         compileformat() {

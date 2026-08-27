@@ -21,6 +21,7 @@ CFLAGS := -O3 \
 LDFLAGS := -O3 \
     -s SINGLE_FILE=1 \
     -s ENVIRONMENT=web,worker \
+	-s ASYNCIFY=1 \
     -s EXPORTED_FUNCTIONS='["_compileBibtex", "_compileLaTeX", "_compileFormat", "_main", "_setMainEntry", "_malloc", "_free"]' \
     -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap"]' \
     -s NO_EXIT_RUNTIME=1 \

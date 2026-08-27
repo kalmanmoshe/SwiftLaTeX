@@ -4,34 +4,46 @@ let texlive200Cache = {};
 let font404Cache = {};
 let font200Cache = {};
 
-function compileLaTeXRoutine() {
-    prepareExecutionContext();
+async function compileLaTeXRoutine() {
+    try {
+        prepareExecutionContext();
 
-    const setMainEntry = cwrap(
-        "setMainEntry",
-        "number",
-        ["string"],
-    );
+        const setMainEntry = cwrap(
+            "setMainEntry",
+            "number",
+            ["string"],
+        );
 
-    setMainEntry(self.mainfile);
+        setMainEntry(self.mainfile);
 
-    let status = _compileLaTeX();
+        let status = await ccall(
+            "compileLaTeX",
+            "number",
+            [],
+            [],
+            {
+                async: true,
+            },
+        );
 
-    if (status === 0) {
-        _compileBibtex();
+        if (status === 0) {
+            _compileBibtex();
+        }
+
+        const outputName =
+            self.mainfile.replace(/\.tex$/i, ".xdv");
+
+        sendCompilationOutput({
+            status,
+            outputPath: `${WORKROOT}/${outputName}`,
+            command: "compilelatex",
+
+            // Keeping the existing host protocol for now.
+            outputProperty: "pdf",
+        });
+    } finally {
+        clearHostResolutionCaches();
     }
-
-    const outputName =
-        self.mainfile.replace(/\.tex$/i, ".xdv");
-
-    sendCompilationOutput({
-        status,
-        outputPath: `${WORKROOT}/${outputName}`,
-        command: "compilelatex",
-
-        // Keeping the existing host protocol for now.
-        outputProperty: "pdf",
-    });
 }
 
 function compileFormatRoutine() {
@@ -47,27 +59,34 @@ function compileFormatRoutine() {
     });
 }
 
-function kpse_find_file_impl(
+async function kpse_find_file_impl(
     namePointer,
     format,
-    _mustExist,
+    mustExist,
+    requestingFilePointer
 ) {
-    const requestedName = UTF8ToString(namePointer);
 
-    if (requestedName.includes("/")) {
-        return 0;
-    }
+    const requestedPath = UTF8ToString(namePointer);
+    const requestingPath = requestingFilePointer
+        ? UTF8ToString(requestingFilePointer)
+        : null;
 
-    const cacheKey =
-        `${format}/${requestedName}`;
-
-    return downloadRemoteFile({
-        cacheKey,
-        successfulCache: texlive200Cache,
-        missingCache: texlive404Cache,
-        remotePath: `xetex/${cacheKey}`,
-        responseHeader: "fileid",
+    const resolvedPath = await resolveFile({
+        requestedPath,
+        requestingPath,
+        format,
+        mustExist: Boolean(mustExist),
+        remoteConfig: {
+            successfulCache: texlive200Cache,
+            missingCache: texlive404Cache,
+            pathPrefix: "xetex",
+            responseHeader: "fileid",
+        },
     });
+
+    return resolvedPath
+        ? allocateString(resolvedPath)
+        : 0;
 }
 
 function fontconfig_search_font_impl(
@@ -103,7 +122,7 @@ initializeWorker({
 
     commandHandlers: {
         compilelatex() {
-            compileLaTeXRoutine();
+            void compileLaTeXRoutine();
         },
 
         compileformat() {

@@ -6,7 +6,8 @@ var Module = {};
 self.memlog = "";
 self.initmem = undefined;
 self.mainfile = "main.tex";
-self.texlive_endpoint = "https://texlive2.swiftlatex.com/";
+//its the public mirror of `https://texlive2.swiftlatex.com/` (which is down and not maintained any more) maintained by Texlyre
+self.texlive_endpoint = "https://texlive.texlyre.org/";
 
 self.onerror = function (message, source, lineno, colno, error) {
     console.error(
@@ -117,6 +118,8 @@ function closeFSStreams() {
 function prepareExecutionContext() {
     self.memlog = "";
 
+    //we dont put clearHostResolutionCaches(); here as it would break the preloaded files cache, which is not what we want. 
+    // so instead we clear it after each compilation, which is the only time we want to clear it.
     closeFSStreams();
     restoreHeapMemory();
 
@@ -208,7 +211,9 @@ function mkdirRoutine(dirname) {
 
 function writeFileRoutine(filename, content) {
     try {
-        FS.writeFile(`${WORKROOT}/${filename}`, content);
+        const workPath = `${WORKROOT}/${filename}`;
+        ensureParentDirectories(workPath);
+        FS.writeFile(workPath, content);
         respondOk("writefile");
     } catch (error) {
         console.error(`Unable to write work file ${filename}`, error);
@@ -218,7 +223,9 @@ function writeFileRoutine(filename, content) {
 
 function writeTexFileRoutine(filename, content) {
     try {
-        FS.writeFile(`${TEXCACHEROOT}/${filename}`, content);
+        const texPath = `${TEXCACHEROOT}/${filename}`;
+        ensureParentDirectories(texPath);
+        FS.writeFile(texPath, content);
         respondOk("writetexfile");
     } catch (error) {
         console.error(`Unable to write TeX file ${filename}`, error);
@@ -325,6 +332,225 @@ function sendCompilationOutput({
     }
 }
 
+const hostResolvedCache = new Map();
+const hostMissingCache = new Set();
+const pendingMandatoryLookup = new Map();
+
+function makeFileKey(
+    requestedPath,
+    requestingPath,
+    format,
+) {
+    return JSON.stringify([
+        requestingPath ?? null,
+        requestedPath,
+        format,
+    ]);
+}
+
+function clearHostResolutionCaches() {
+    hostResolvedCache.clear();
+    hostMissingCache.clear();
+    pendingMandatoryLookup.clear();
+}
+
+let nextHostFileRequestId = 1;
+const pendingHostFileRequests = new Map();
+
+function requestFileFromHost(requestedPath, requestingPath, format) {
+    return new Promise((resolve) => {
+        const requestId = nextHostFileRequestId++;
+
+        pendingHostFileRequests.set(
+            requestId,
+            resolve,
+        );
+
+        self.postMessage({
+            cmd: "resolvefile",
+            requestId,
+            requestedPath,
+            requestingPath,
+            format,
+        });
+    });
+}
+
+function handleResolveFileResponse(data) {
+    const resolve = pendingHostFileRequests.get(data.requestId);
+
+    if (!resolve) {
+        console.warn(
+            `Received response for unknown file request ${data.requestId}`,
+        );
+
+        return;
+    }
+
+    pendingHostFileRequests.delete(data.requestId);
+
+    resolve(data);
+}
+
+async function resolveFileFromHost(
+    requestedPath,
+    requestingPath,
+    format,
+) {
+    const response = await requestFileFromHost(
+        requestedPath,
+        requestingPath,
+        format,
+    );
+
+    if (!response.found) {
+        return 0;
+    }
+
+    const workPath = writeHostFileToWork(
+        response.virtualPath,
+        response.content,
+    );
+
+    return workPath;
+}
+
+function ensureParentDirectories(filePath) {
+    const normalized =
+        filePath.replaceAll("\\", "/");
+
+    const parts = normalized
+        .split("/")
+        .slice(0, -1);
+
+    let current = "";
+
+    for (const part of parts) {
+        if (!part) {
+            continue;
+        }
+
+        current += `/${part}`;
+
+        if (!FS.analyzePath(current).exists) {
+            FS.mkdir(current);
+        }
+    }
+}
+
+function writeHostFileToWork(
+    virtualPath,
+    content,
+) {
+    const normalizedPath = virtualPath.replaceAll("\\", "/");
+
+    const workPath = `${WORKROOT}/${normalizedPath}`;
+
+    ensureParentDirectories(workPath);
+
+    FS.writeFile(
+        workPath,
+        content,
+    );
+
+    return workPath;
+}
+
+async function resolveFile({
+    requestedPath,
+    requestingPath,
+    format,
+    mustExist,
+    remoteConfig,
+}) {
+    const contextualKey = makeFileKey(
+        requestedPath,
+        requestingPath,
+        format,
+    );
+
+    const contextlessKey = makeFileKey(
+        requestedPath,
+        null,
+        format,
+    );
+
+    const cacheKey = `${format}/${requestedPath}`;
+
+    // Kpathsea follow-up bridge.
+    if (mustExist && !requestingPath) {
+        const pendingPath =
+            pendingMandatoryLookup.get(contextlessKey);
+
+        if (pendingPath) {
+            pendingMandatoryLookup.delete(contextlessKey);
+            return pendingPath;
+        }
+    }
+
+    // Host cache.
+    const cachedHostPath =
+        hostResolvedCache.get(contextualKey);
+
+    if (cachedHostPath) {
+        return cachedHostPath;
+    }
+
+    // Remote successful cache.
+    if (cacheKey in remoteConfig.successfulCache) {
+        return remoteConfig.successfulCache[cacheKey];
+    }
+
+    const hostAlreadyMissed =
+        hostMissingCache.has(contextualKey);
+
+    // Try host first whenever we have source context.
+    if (requestingPath && !hostAlreadyMissed) {
+        const hostPath = await resolveFileFromHost(
+            requestedPath,
+            requestingPath,
+            format,
+        );
+
+        if (hostPath) {
+            hostResolvedCache.set(
+                contextualKey,
+                hostPath,
+            );
+
+            if (!mustExist) {
+                pendingMandatoryLookup.set(
+                    contextlessKey,
+                    hostPath,
+                );
+            }
+
+            return hostPath;
+        }
+
+        hostMissingCache.add(contextualKey);
+    }
+
+    // Any explicit path belongs to the host only.
+     // If TeXLive already told us it's missing, don't hit the network again.
+    if (hasPathComponent(requestedPath) || cacheKey in remoteConfig.missingCache) {
+        return null;
+    }
+
+    // Finally try remote.
+    return downloadRemoteFile({
+        cacheKey,
+        successfulCache: remoteConfig.successfulCache,
+        missingCache: remoteConfig.missingCache,
+        remotePath: `${remoteConfig.pathPrefix}/${cacheKey}`,
+        responseHeader: remoteConfig.responseHeader,
+    });
+}
+
+function hasPathComponent(path) {
+    return path.includes("/") || path.includes("\\");
+}
+
 function downloadRemoteFile({
     cacheKey,
     successfulCache,
@@ -333,11 +559,11 @@ function downloadRemoteFile({
     responseHeader,
 }) {
     if (cacheKey in missingCache) {
-        return 0;
+        return null;
     }
 
     if (cacheKey in successfulCache) {
-        return allocateString(successfulCache[cacheKey]);
+        return successfulCache[cacheKey];
     }
 
     const remoteUrl = self.texlive_endpoint + remotePath;
@@ -354,7 +580,7 @@ function downloadRemoteFile({
         xhr.send();
     } catch (error) {
         console.error(`Download failed: ${remoteUrl}`, error);
-        return 0;
+        return null;
     }
 
     if (xhr.status === 200) {
@@ -366,7 +592,7 @@ function downloadRemoteFile({
                 `${responseHeader} header`,
             );
 
-            return 0;
+            return null;
         }
 
         const savePath = `${TEXCACHEROOT}/${fileId}`;
@@ -378,7 +604,7 @@ function downloadRemoteFile({
 
         successfulCache[cacheKey] = savePath;
 
-        return allocateString(savePath);
+        return savePath;
     }
 
     if (xhr.status === 301 || xhr.status === 404) {
@@ -429,6 +655,10 @@ function initializeWorker(config) {
                 removeFileRoutine(data.url);
             },
 
+            resolvefile() {
+                handleResolveFileResponse(data);
+            },
+
             fetchfile() {
                 transferTexFileToHost(data.fileName);
             },
@@ -450,6 +680,27 @@ function initializeWorker(config) {
                 clearCaches();
 
                 respondOk("flushcache");
+            },
+
+            registerResolvedFile() {
+                const {
+                    requestedPath,
+                    requestingPath,
+                    format,
+                    virtualPath,
+                } = data;
+
+                const workPath = `${WORKROOT}/${virtualPath}`;
+
+                hostResolvedCache.set(
+                    makeFileKey(
+                        requestedPath,
+                        requestingPath,
+                        format,
+                    ),
+                    workPath,
+                );
+                respondOk("registerResolvedFile");
             },
 
             fetchcache() {

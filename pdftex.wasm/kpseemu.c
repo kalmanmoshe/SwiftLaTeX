@@ -189,8 +189,60 @@ int xfclose(FILE *stream, const_string filename) {
   return 0;
 }
 
-extern char* kpse_find_file_js(const char* name, kpse_file_format_type format,
-                     boolean must_exist);
+static char *tex_string_to_cstring(strnumber s) {
+    if (s < 0 || s >= strptr) {
+        return NULL;
+    }
+
+    poolpointer start = strstart[s];
+    poolpointer end = strstart[s + 1];
+
+    size_t length = (size_t)(end - start);
+
+    char *result = malloc(length + 1);
+
+    if (!result) {
+        return NULL;
+    }
+
+    memcpy(
+        result,
+        &strpool[start],
+        length
+    );
+
+    result[length] = '\0';
+
+    return result;
+}
+
+static char *get_current_input_file(void) {
+    if (inopen <= 0) {
+        return NULL;
+    }
+
+    strnumber current = fullsourcefilenamestack[inopen];
+
+    strnumber previous = fullsourcefilenamestack[inopen - 1];
+    
+    strnumber source =
+        current != 0
+            ? current
+            : previous;
+
+    if (source == 0) {
+        return NULL;
+    }
+
+    return tex_string_to_cstring(source);
+}
+
+extern char* kpse_find_file_js(
+    const char* name,
+    kpse_file_format_type format,
+    boolean must_exist,
+    const char* requesting_file
+);
 
 
 extern char* kpse_find_pk_js(const char* passed_fontname,  unsigned int dpi);
@@ -370,9 +422,21 @@ char* kpse_find_file(const char* name, kpse_file_format_type format,
   // End local Search
   free(local_name);
 
-  // Head to network search
-  return kpse_find_file_js(name, format, must_exist);
+  char *requesting_file =
+    get_current_input_file();
 
+  char *result =  kpse_find_file_js(
+          name,
+          format,
+          must_exist,
+          requesting_file
+      );
+
+  if (requesting_file) {
+    free(requesting_file);
+  }
+  
+  return result;
 }
 
 char* kpse_find_pk(const char* fontname,  unsigned int dpi) {
