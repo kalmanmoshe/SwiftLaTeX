@@ -21,6 +21,7 @@ LDFLAGS := -O3 \
 	-s SINGLE_FILE=1 \
 	-s ENVIRONMENT=web,worker \
 	-s ASYNCIFY=1 \
+	-s ASYNCIFY_STACK_SIZE=16384 \
 	-s EXPORTED_FUNCTIONS='["_compilePDF", "_setMainEntry", "_main", "_malloc", "_free"]' \
 	-s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap"]' \
     -s NO_EXIT_RUNTIME=1 \

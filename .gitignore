@@ -16,3 +16,5 @@ swiftlatexdvipdfm.worker.js
 *.Identifier
 .texlive_tmp
 .DS_Store
+
+.vscode

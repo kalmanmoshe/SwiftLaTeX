@@ -72,7 +72,8 @@ async function kpse_find_file_impl(
     mustExist,
     requestingFilePointer
 ) {
-    const requestedPath =  UTF8ToString(namePointer);
+     
+    const requestedPath = UTF8ToString(namePointer);
 
     const requestingPath = requestingFilePointer ? UTF8ToString(requestingFilePointer) : null;
 
@@ -81,8 +82,7 @@ async function kpse_find_file_impl(
             requestedPath,
             requestingPath,
             format,
-            mustExist:
-                Boolean(mustExist),
+            mustExist: Boolean(mustExist),
 
             remoteConfig: {
                 successfulCache: texlive200Cache,

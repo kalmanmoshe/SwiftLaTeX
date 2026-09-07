@@ -391,8 +391,11 @@ static void fix_extension(char *local_name, int format) {
 }
 
 #define MAX_PATH_LEN 256
-char* kpse_find_file(const char* name, kpse_file_format_type format,
-                     boolean must_exist) {
+char* kpse_find_file(
+  const char* name, 
+  kpse_file_format_type format,
+  boolean must_exist
+) {
   if (name == NULL) {
     return NULL;
   }

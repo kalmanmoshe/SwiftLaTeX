@@ -76,6 +76,7 @@ async function kpse_find_file_impl(
         requestingPath,
         format,
         mustExist: Boolean(mustExist),
+        
         remoteConfig: {
             successfulCache: texlive200Cache,
             missingCache: texlive404Cache,
